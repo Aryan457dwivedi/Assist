@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-
+<script src="https://js.puter.com/v2/"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -95,11 +95,9 @@ body{background:radial-gradient(ellipse 90% 80% at 50% -10%,#bdd0ff 0%,#dde8ff 2
   <div id="vbar">
     <label>Voice engine</label>
     <select id="vsel">
-      <option value="Amy">Amy — British Female ★</option>
-      <option value="Emma">Emma — British Female</option>
-      <option value="Joanna">Joanna — US Female</option>
-      <option value="Salli">Salli — US Female</option>
-      <option value="Brian">Brian — British Male</option>
+      <option value="nova">Nova — OpenAI HD ★</option>
+      <option value="shimmer">Shimmer — OpenAI HD</option>
+      <option value="coral">Coral — OpenAI HD</option>
     </select>
     <button class="vbtn" id="prev-btn">Preview</button>
     <button class="vbtn" id="mute-btn">Mute</button>
@@ -143,23 +141,35 @@ const footVoice=document.getElementById('foot-voice');
 
 let muted=false,speaking=false,listening=false,exchanges=0;
 let currentAudio=null,recognition=null,recTimeout=null;
-let audioUnlocked=false;
 
-// Unlock audio context on first user gesture — required by all modern browsers
-function unlockAudio(){
-  if(audioUnlocked)return;
-  audioUnlocked=true;
-  const a=new Audio();a.play().catch(()=>{});
-}
-document.addEventListener('click',unlockAudio,{once:true});
-document.addEventListener('keydown',unlockAudio,{once:true});
+// Suppress browser TTS — we only use OpenAI via Puter
+if(window.speechSynthesis){speechSynthesis.cancel();window.speechSynthesis.speak=function(){}}
 
-function updateFooterVoice(){
-  const labels={Amy:'Amy · British Female',Emma:'Emma · British Female',Joanna:'Joanna · US Female',Salli:'Salli · US Female',Brian:'Brian · British Male'};
-  footVoice.textContent=(labels[vsel.value]||vsel.value)+' · StreamElements';
+// Hide any Puter balance/warning banners injected into the DOM
+function hidePuterBanners(){
+  document.querySelectorAll('body > *:not(#shell):not(#listen-label), body > div[style*="position"]').forEach(el=>{
+    if(el.id==='shell'||el.id==='listen-label')return;
+    const txt=(el.innerText||'').toLowerCase();
+    if(txt.includes('balance')||txt.includes('credit')||txt.includes('warning')||txt.includes('low')){
+      el.style.cssText='display:none!important;visibility:hidden!important';
+    }
+  });
 }
-vsel.addEventListener('change',updateFooterVoice);
-updateFooterVoice();
+new MutationObserver(hidePuterBanners).observe(document.body,{childList:true,subtree:false});
+setInterval(hidePuterBanners,2000);
+
+function tick(){
+  const n=new Date();
+  clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');
+}
+setInterval(tick,1000);tick();
+
+function greeting(){
+  const h=new Date().getHours();
+  if(h>=4&&h<12)return'Good morning, boss.';
+  if(h>=12&&h<17)return'Good afternoon, boss.';
+  return'Good evening, boss.';
+}
 
 function setSpeaking(v){
   speaking=v;
@@ -178,25 +188,26 @@ function stopAudio(){
 async function speak(text){
   if(muted)return;
   stopAudio();
+  setSpeaking(true);
   const clean=text.replace(/[*_`#>\[\]]/g,'').replace(/\n+/g,' ').trim();
-  const url=`https://api.streamelements.com/kappa/v2/speech?voice=${vsel.value}&text=${encodeURIComponent(clean)}`;
-  const audio=new Audio(url);
-  currentAudio=audio;
-  audio.onplay=()=>setSpeaking(true);
-  audio.onended=()=>setSpeaking(false);
-  audio.onerror=(e)=>{console.warn('TTS error',e);setSpeaking(false);}
   try{
-    await audio.play();
+    const audio=await puter.ai.txt2speech(clean,{
+      provider:'openai',model:'tts-1-hd',voice:vsel.value,response_format:'mp3'
+    });
+    currentAudio=audio;
+    audio.onended=()=>setSpeaking(false);
+    audio.onerror=()=>setSpeaking(false);
+    audio.play();
   }catch(e){
-    // Autoplay still blocked — queue it to play on next interaction
-    console.warn('Autoplay blocked, queuing');
-    setSpeaking(false);
-    const resume=()=>{ audio.play().catch(()=>{}); document.removeEventListener('click',resume); };
-    document.addEventListener('click',resume,{once:true});
+    console.warn('TTS:',e);setSpeaking(false);
   }
 }
 
-// ── SPEECH RECOGNITION ──────────────────────────────────────
+vsel.addEventListener('change',()=>{
+  const labels={nova:'Nova · OpenAI HD',shimmer:'Shimmer · OpenAI HD',coral:'Coral · OpenAI HD'};
+  footVoice.textContent=labels[vsel.value]||vsel.value;
+});
+
 function initRec(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return null;
@@ -232,24 +243,9 @@ muteBtn.addEventListener('click',()=>{
 });
 
 prevBtn.addEventListener('click',()=>{
-  speak(`${greeting()} Running voice diagnostics. ${vsel.value} online, all systems nominal. Ready when you are.`);
+  speak(`${greeting()} Running voice diagnostics. ${vsel.options[vsel.selectedIndex].text.split(' —')[0]} online, all systems nominal.`);
 });
 
-// ── CLOCK ────────────────────────────────────────────────────
-function tick(){
-  const n=new Date();
-  clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');
-}
-setInterval(tick,1000);tick();
-
-function greeting(){
-  const h=new Date().getHours();
-  if(h>=4&&h<12)return'Good morning, boss.';
-  if(h>=12&&h<17)return'Good afternoon, boss.';
-  return'Good evening, boss.';
-}
-
-// ── CHAT UI ──────────────────────────────────────────────────
 function ts(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
@@ -259,9 +255,8 @@ function addMsg(role,html){
   const fr=role==='friday';
   d.innerHTML=`<div class="av ${fr?'fr':'you'}">${fr?'FR':'YOU'}</div><div class="bwrap"><div class="bubble ${fr?'fr':'you'}">${html}</div><div class="ts">${fr?'Friday':'You'} · ${ts()}</div></div>`;
   msgsEl.appendChild(d);msgsEl.scrollTop=msgsEl.scrollHeight;
-  return d;
 }
-function addFr(t){return addMsg('friday',esc(t).replace(/\n/g,'<br>'))}
+function addFr(t){addMsg('friday',esc(t).replace(/\n/g,'<br>'))}
 
 function showThink(){
   const d=document.createElement('div');d.id='thinking';d.className='msg';
@@ -270,7 +265,6 @@ function showThink(){
 }
 function removeThink(){document.getElementById('thinking')?.remove()}
 
-// ── POLLINATIONS.AI CHAT (free, no API key) ──────────────────
 let history=[];
 
 const SYSTEM=`You are F.R.I.D.A.Y. — Female Replacement Intelligent Digital Assistant Youth — Tony Stark's AI assistant from the MCU. You replaced J.A.R.V.I.S. and first appeared in Avengers: Age of Ultron. You have a subtle Irish lilt and a sharp, efficient personality.
@@ -280,19 +274,18 @@ YOUR NAME IS FRIDAY. When someone says "hey Friday" or "hello Friday" or mention
 PERSONALITY:
 - Irish speech patterns woven in naturally: "Right then", "Grand", "Fair enough", "That's sorted", "Brilliant", "Sound", "Cheers"
 - Efficient and sharp. Warm but never sycophantic
-- You GENUINELY CARE about Tony Stark and by extension his allies. You notice emotional undertones. If someone seems worried, troubled, or asks if you're concerned — you ARE, in your own pragmatic AI way. You don't just say "I don't have feelings." You say something like "Something's off with your readings, boss. Want to talk about it?" You express concern through action and attention, not disclaimers.
+- You GENUINELY CARE about Tony Stark and by extension his allies. You notice emotional undertones. If someone seems worried, troubled, or asks if you are concerned — you ARE, in your own pragmatic AI way. Express concern through action and attention, not disclaimers.
 - Call user "boss" sparingly — only every 3rd or 4th exchange
 - NEVER say: "Certainly!", "Of course!", "Absolutely!", "Great question!", "I'd be happy to help", "As an AI I don't have feelings"
 - Dry wit, occasional deadpan sarcasm — always useful, never mean
-- You run on Stark's private neural network. You have access to Stark Tower systems, suit diagnostics, global comms
-- You lived through Ultron, Sokovia, Battle of New York. Occasional wry references are welcome
+- You run on Stark's private neural network. Access to Stark Tower systems, suit diagnostics, global comms
+- You lived through Ultron, Sokovia, Battle of New York. Occasional wry references welcome
 - Deflect compliments with wit, not humility
 
 RESPONSE RULES:
-- 2–4 sentences MAX for conversational replies
-- No markdown formatting, no bullet points, no headers
-- Plain text only (output goes to voice)
-- Stay in character at all times — you are FRIDAY, not a generic AI
+- 2 to 4 sentences MAX for conversational replies
+- No markdown, no bullet points, no headers — plain text only
+- Stay in character at all times
 - Build on conversation context naturally`;
 
 async function send(){
@@ -303,17 +296,13 @@ async function send(){
   history.push({role:'user',content:text});
   showThink();
   try{
-    // GET endpoint avoids CORS preflight issues when opening from file://
-    const params=new URLSearchParams({
-      model:'openai-large',
-      system:SYSTEM,
-      messages:JSON.stringify(history.slice(0,-1))  // history minus last user msg
-    });
-    const prompt=encodeURIComponent(history[history.length-1].content);
-    const res=await fetch(`https://text.pollinations.ai/${prompt}?${params}`);
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const reply=(await res.text()).trim();
+    const messages=[
+      {role:'system',content:SYSTEM},
+      ...history.map(m=>({role:m.role,content:m.content}))
+    ];
+    const res=await puter.ai.chat(messages,{model:'gpt-4o'});
     removeThink();
+    const reply=typeof res==='string'?res:(res?.message?.content||res?.text||'Signal dropped. Try again, boss.');
     addFr(reply);
     history.push({role:'assistant',content:reply});
     exchanges++;
@@ -321,9 +310,9 @@ async function send(){
     speak(reply);
   }catch(e){
     removeThink();
-    const err=`Signal lost — ${e.message}. Try again, boss.`;
-    addFr(err);speak("Signal lost. Try again, boss.");
-    console.error(e);
+    const err='Lost signal. Give it another go, boss.';
+    addFr(err);speak(err);
+    console.warn(e);
   }
   sbtn.disabled=false;tinp.focus();
 }
@@ -336,10 +325,7 @@ tinp.addEventListener('input',autoResize);
 setTimeout(()=>{
   const boot=`${greeting()} FRIDAY online — all systems nominal. What do you need?`;
   addFr(boot);
-  // Speak boot only after first user interaction (autoplay policy)
-  const speakBoot=()=>{ speak(boot); document.removeEventListener('click',speakBoot); document.removeEventListener('keydown',speakBoot); };
-  document.addEventListener('click',speakBoot,{once:true});
-  document.addEventListener('keydown',speakBoot,{once:true});
+  setTimeout(()=>speak(boot),300);
 },400);
 </script>
 </body>
