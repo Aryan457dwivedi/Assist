@@ -316,16 +316,14 @@ async function send(){
   history.push({role:'user',content:text});
   showThink();
   try{
-    const res=await fetch('https://text.pollinations.ai/',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        messages:history.map(m=>({role:m.role,content:m.content})),
-        model:'openai-large',
-        system:SYSTEM,
-        seed:-1
-      })
+    // GET endpoint avoids CORS preflight issues when opening from file://
+    const params=new URLSearchParams({
+      model:'openai-large',
+      system:SYSTEM,
+      messages:JSON.stringify(history.slice(0,-1))  // history minus last user msg
     });
+    const prompt=encodeURIComponent(history[history.length-1].content);
+    const res=await fetch(`https://text.pollinations.ai/${prompt}?${params}`);
     if(!res.ok)throw new Error('HTTP '+res.status);
     const reply=(await res.text()).trim();
     removeThink();
@@ -336,9 +334,9 @@ async function send(){
     speak(reply);
   }catch(e){
     removeThink();
-    const err="Lost signal. Give it another go, boss.";
-    addFr(err);speak(err);
-    console.warn(e);
+    const err=`Signal lost — ${e.message}. Try again, boss.`;
+    addFr(err);speak("Signal lost. Try again, boss.");
+    console.error(e);
   }
   sbtn.disabled=false;tinp.focus();
 }
