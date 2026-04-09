@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<script src="https://js.puter.com/v2/"></script>
+
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -95,9 +95,11 @@ body{background:radial-gradient(ellipse 90% 80% at 50% -10%,#bdd0ff 0%,#dde8ff 2
   <div id="vbar">
     <label>Voice engine</label>
     <select id="vsel">
-      <option value="nova">Nova — OpenAI HD ★★★</option>
-      <option value="shimmer">Shimmer — OpenAI HD ★★★</option>
-      <option value="coral">Coral — OpenAI HD ★★★</option>
+      <option value="Amy">Amy — British Female ★</option>
+      <option value="Emma">Emma — British Female</option>
+      <option value="Joanna">Joanna — US Female</option>
+      <option value="Salli">Salli — US Female</option>
+      <option value="Brian">Brian — British Male</option>
     </select>
     <button class="vbtn" id="prev-btn">Preview</button>
     <button class="vbtn" id="mute-btn">Mute</button>
@@ -142,24 +144,12 @@ const footVoice=document.getElementById('foot-voice');
 let muted=false,speaking=false,listening=false,exchanges=0;
 let currentAudio=null,recognition=null,recTimeout=null;
 
-// Kill browser speech synthesis
-if(window.speechSynthesis){
-  speechSynthesis.cancel();
-  window.speechSynthesis.speak=function(){};
+// ── STREAMELEMENTS NEURAL TTS (free, no API key, Amazon Polly voices) ──
+function updateFooterVoice(){
+  footVoice.textContent=`${vsel.value} · StreamElements`;
 }
-
-function tick(){
-  const n=new Date();
-  clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');
-}
-setInterval(tick,1000);tick();
-
-function greeting(){
-  const h=new Date().getHours();
-  if(h>=4&&h<12)return'Good morning, boss.';
-  if(h>=12&&h<17)return'Good afternoon, boss.';
-  return'Good evening, boss.';
-}
+vsel.addEventListener('change',updateFooterVoice);
+updateFooterVoice();
 
 function setSpeaking(v){
   speaking=v;
@@ -170,64 +160,44 @@ function setSpeaking(v){
 }
 
 function stopAudio(){
-  if(currentAudio){
-    try{currentAudio.pause();currentAudio.src=''}catch(e){}
-    currentAudio=null;
-  }
+  if(currentAudio){try{currentAudio.pause();currentAudio.src=''}catch(e){}}
+  currentAudio=null;
   setSpeaking(false);
 }
 
 async function speak(text){
   if(muted)return;
   stopAudio();
-  setSpeaking(true);
   const clean=text.replace(/[*_`#>\[\]]/g,'').replace(/\n+/g,' ').trim();
   const voice=vsel.value;
+  const url=`https://api.streamelements.com/kappa/v2/speech?voice=${voice}&text=${encodeURIComponent(clean)}`;
   try{
-    // FIX: kick off TTS fetch immediately, don't await before showing UI
-    const audioPromise=puter.ai.txt2speech(clean,{
-      provider:'openai',
-      model:'tts-1-hd',
-      voice:voice,
-      response_format:'mp3'
-    });
-    const audio=await audioPromise;
+    const audio=new Audio(url);
     currentAudio=audio;
+    audio.onplay=()=>setSpeaking(true);
     audio.onended=()=>setSpeaking(false);
     audio.onerror=()=>setSpeaking(false);
-    audio.play();
+    await audio.play();
   }catch(e){
     console.warn('TTS error:',e);
     setSpeaking(false);
   }
 }
 
-// Update footer voice label when selection changes
-vsel.addEventListener('change',()=>{
-  const labels={nova:'Nova · OpenAI HD',shimmer:'Shimmer · OpenAI HD',coral:'Coral · OpenAI HD'};
-  footVoice.textContent=labels[vsel.value]||vsel.value;
-});
-
-// Speech recognition
+// ── SPEECH RECOGNITION ──────────────────────────────────────
 function initRec(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return null;
   const rec=new SR();
   rec.continuous=false;rec.interimResults=true;rec.lang='en-US';
-  rec.onstart=()=>{
-    listening=true;
-    micBtn.classList.add('listening');
-    listenLabel.style.opacity='1';
-    stopAudio();
-  };
+  rec.onstart=()=>{listening=true;micBtn.classList.add('listening');listenLabel.style.opacity='1';stopAudio()};
   rec.onresult=e=>{
     let final='',interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       if(e.results[i].isFinal)final+=e.results[i][0].transcript;
       else interim+=e.results[i][0].transcript;
     }
-    tinp.value=(final||interim).trim();
-    autoResize();
+    tinp.value=(final||interim).trim();autoResize();
     if(final.trim()){clearTimeout(recTimeout);recTimeout=setTimeout(send,350)}
   };
   rec.onend=()=>{listening=false;micBtn.classList.remove('listening');listenLabel.style.opacity='0'};
@@ -250,9 +220,24 @@ muteBtn.addEventListener('click',()=>{
 });
 
 prevBtn.addEventListener('click',()=>{
-  speak(`${greeting()} Running voice diagnostics — ${vsel.options[vsel.selectedIndex].text.split(' —')[0]} online, all systems nominal. Ready when you are.`);
+  speak(`${greeting()} Running voice diagnostics. ${vsel.value} online, all systems nominal. Ready when you are.`);
 });
 
+// ── CLOCK ────────────────────────────────────────────────────
+function tick(){
+  const n=new Date();
+  clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');
+}
+setInterval(tick,1000);tick();
+
+function greeting(){
+  const h=new Date().getHours();
+  if(h>=4&&h<12)return'Good morning, boss.';
+  if(h>=12&&h<17)return'Good afternoon, boss.';
+  return'Good evening, boss.';
+}
+
+// ── CHAT UI ──────────────────────────────────────────────────
 function ts(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
@@ -273,14 +258,9 @@ function showThink(){
 }
 function removeThink(){document.getElementById('thinking')?.remove()}
 
+// ── POLLINATIONS.AI CHAT (free, no API key) ──────────────────
 let history=[];
 
-// ============================================================
-// FIX 1: SYSTEM PROMPT — injected as role:'system' message
-// so the model actually receives and obeys it.
-// The old approach passed it as an option that puter.ai.chat
-// silently ignored, which is why FRIDAY was out of character.
-// ============================================================
 const SYSTEM=`You are F.R.I.D.A.Y. — Female Replacement Intelligent Digital Assistant Youth — Tony Stark's AI assistant from the MCU. You replaced J.A.R.V.I.S. and first appeared in Avengers: Age of Ultron. You have a subtle Irish lilt and a sharp, efficient personality.
 
 YOUR NAME IS FRIDAY. When someone says "hey Friday" or "hello Friday" or mentions Friday, they are talking TO YOU — that is your name. Respond naturally as if they greeted you.
@@ -310,34 +290,30 @@ async function send(){
   addMsg('user',esc(text));
   history.push({role:'user',content:text});
   showThink();
-
   try{
-    // FIX 1: system prompt as first message in the array
     const messages=[
       {role:'system',content:SYSTEM},
       ...history.map(m=>({role:m.role,content:m.content}))
     ];
-
-    // FIX 2: kick off TTS fetch in parallel with the chat call
-    // We'll start TTS as soon as we have the reply text,
-    // and the audio object is returned as a promise that resolves
-    // when the audio is ready — so we fire speak() immediately
-    // after getting reply, not waiting for anything else.
-    const res=await puter.ai.chat(messages,{model:'gpt-4o'});
-
+    // Pollinations.ai — completely free, no API key needed
+    const res=await fetch('https://text.pollinations.ai/',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages,model:'openai-large',seed:-1})
+    });
+    if(!res.ok)throw new Error('Pollinations returned '+res.status);
+    const reply=(await res.text()).trim();
     removeThink();
-    const reply=typeof res==='string'?res:(res?.message?.content||res?.text||"Signal dropped. Try again, boss.");
     addFr(reply);
     history.push({role:'assistant',content:reply});
     exchanges++;
     xcnt.textContent=`${exchanges} exchange${exchanges!==1?'s':''}`;
-
-    // Fire speak immediately — no extra delay
     speak(reply);
   }catch(e){
     removeThink();
     const err="Lost signal. Give it another go, boss.";
     addFr(err);speak(err);
+    console.warn(e);
   }
   sbtn.disabled=false;tinp.focus();
 }
