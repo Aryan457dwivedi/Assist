@@ -95,11 +95,10 @@ body{background:radial-gradient(ellipse 90% 80% at 50% -10%,#bdd0ff 0%,#dde8ff 2
   <div id="vbar">
     <label>Voice engine</label>
     <select id="vsel">
-      <option value="Amy">Amy — British Female ★</option>
-      <option value="Emma">Emma — British Female</option>
-      <option value="Joanna">Joanna — US Female</option>
-      <option value="Salli">Salli — US Female</option>
-      <option value="Brian">Brian — British Male</option>
+      <option value="en-GB">en-GB — British English ★</option>
+      <option value="en-IE">en-IE — Irish English</option>
+      <option value="en-AU">en-AU — Australian English</option>
+      <option value="en-US">en-US — American English</option>
     </select>
     <button class="vbtn" id="prev-btn">Preview</button>
     <button class="vbtn" id="mute-btn">Mute</button>
@@ -144,9 +143,8 @@ const footVoice=document.getElementById('foot-voice');
 let muted=false,speaking=false,listening=false,exchanges=0;
 let currentAudio=null,recognition=null,recTimeout=null;
 
-// ── STREAMELEMENTS NEURAL TTS (free, no API key, Amazon Polly voices) ──
 function updateFooterVoice(){
-  footVoice.textContent=`${vsel.value} · StreamElements`;
+  footVoice.textContent=`${vsel.value} · Google TTS`;
 }
 vsel.addEventListener('change',updateFooterVoice);
 updateFooterVoice();
@@ -165,23 +163,50 @@ function stopAudio(){
   setSpeaking(false);
 }
 
+// Google Translate TTS — free, no key, works as audio src (no CORS block)
+// Chunk into ≤200 char sentences to stay within URL limits
+function chunkText(text,max=190){
+  const sentences=text.match(/[^.!?]+[.!?]*/g)||[text];
+  const chunks=[];let cur='';
+  for(const s of sentences){
+    if((cur+s).length>max&&cur){chunks.push(cur.trim());cur=s;}
+    else cur+=s;
+  }
+  if(cur.trim())chunks.push(cur.trim());
+  return chunks;
+}
+
 async function speak(text){
   if(muted)return;
   stopAudio();
   const clean=text.replace(/[*_`#>\[\]]/g,'').replace(/\n+/g,' ').trim();
-  const voice=vsel.value;
-  const url=`https://api.streamelements.com/kappa/v2/speech?voice=${voice}&text=${encodeURIComponent(clean)}`;
-  try{
-    const audio=new Audio(url);
-    currentAudio=audio;
-    audio.onplay=()=>setSpeaking(true);
-    audio.onended=()=>setSpeaking(false);
-    audio.onerror=()=>setSpeaking(false);
-    await audio.play();
-  }catch(e){
-    console.warn('TTS error:',e);
-    setSpeaking(false);
+  const lang=vsel.value;
+  const chunks=chunkText(clean);
+  setSpeaking(true);
+  for(let i=0;i<chunks.length;i++){
+    if(muted)break;
+    await new Promise((res,rej)=>{
+      const url=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunks[i])}&tl=${lang}&client=tw-ob`;
+      const audio=new Audio(url);
+      currentAudio=audio;
+      audio.onended=res;
+      audio.onerror=()=>{
+        // fallback to Web Speech for this chunk
+        const utt=new SpeechSynthesisUtterance(chunks[i]);
+        utt.lang='en-GB';utt.rate=0.93;utt.pitch=1.05;
+        utt.onend=res;utt.onerror=res;
+        speechSynthesis.speak(utt);
+      };
+      audio.play().catch(()=>{
+        // autoplay blocked — use Web Speech fallback
+        const utt=new SpeechSynthesisUtterance(chunks[i]);
+        utt.lang='en-GB';utt.rate=0.93;utt.pitch=1.05;
+        utt.onend=res;utt.onerror=res;
+        speechSynthesis.speak(utt);
+      });
+    });
   }
+  setSpeaking(false);
 }
 
 // ── SPEECH RECOGNITION ──────────────────────────────────────
@@ -291,17 +316,17 @@ async function send(){
   history.push({role:'user',content:text});
   showThink();
   try{
-    const messages=[
-      {role:'system',content:SYSTEM},
-      ...history.map(m=>({role:m.role,content:m.content}))
-    ];
-    // Pollinations.ai — completely free, no API key needed
     const res=await fetch('https://text.pollinations.ai/',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages,model:'openai-large',seed:-1})
+      body:JSON.stringify({
+        messages:history.map(m=>({role:m.role,content:m.content})),
+        model:'openai-large',
+        system:SYSTEM,
+        seed:-1
+      })
     });
-    if(!res.ok)throw new Error('Pollinations returned '+res.status);
+    if(!res.ok)throw new Error('HTTP '+res.status);
     const reply=(await res.text()).trim();
     removeThink();
     addFr(reply);
